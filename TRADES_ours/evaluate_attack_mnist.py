@@ -1,7 +1,6 @@
 from __future__ import print_function
 import argparse
 import torch
-from torch.autograd import Variable
 from models.small_cnn import *
 import numpy as np
 
@@ -81,7 +80,8 @@ def eval_adv_test_whitebox(model, device, X_adv_data, X_data, Y_data):
             target = torch.from_numpy(label).to(device)
 
             # evluation
-            X, y = Variable(data_adv, requires_grad=True), Variable(target)
+            # MODIFIED: Variable已废弃，直接使用tensor并设置requires_grad
+            X, y = data_adv.clone().detach().requires_grad_(True), target.clone().detach()
             out = model(X)
             err_robust = (out.data.max(1)[1] != y.data).float().sum()
             robust_err_total += err_robust

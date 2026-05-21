@@ -1,0 +1,34 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# === PyTorch model checkpoints ===
+*.pt
+*.pth
+*.tar
+model-*/
+model_*/
+checkpoints/
+
+# === Datasets (large files, do not commit) ===
+data/
+**/data_attack/
+*.npy
+
+# === IDE / Editor ===
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Logs ===
+*.log

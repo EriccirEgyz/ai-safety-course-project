@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-from torch.autograd import Variable
 import torch.optim as optim
 from torchvision import datasets, transforms
 from models.wideresnet import *
@@ -88,7 +87,8 @@ def eval_adv_test_whitebox(model, device, X_adv_data, X_data, Y_data):
             target = torch.from_numpy(label).to(device)
 
             # evluation
-            X, y = Variable(data_adv, requires_grad=True), Variable(target)
+            # MODIFIED: Variable已废弃，直接使用tensor并设置requires_grad
+            X, y = data_adv.clone().detach().requires_grad_(True), target.clone().detach()
             out = model(X)
             err_robust = (out.data.max(1)[1] != y.data).float().sum()
             robust_err_total += err_robust

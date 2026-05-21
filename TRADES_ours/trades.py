@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 import torch.optim as optim
 
 
 def squared_l2_norm(x):
-    flattened = x.view(x.unsqueeze(0).shape[0], -1)
+    # MODIFIED: x.unsqueeze(0).shape[0] -> x.shape[0], Variable已废弃，直接用tensor
+    flattened = x.view(x.shape[0], -1)
     return (flattened ** 2).sum(1)
 
 
@@ -24,7 +24,8 @@ def trades_loss(model,
                 beta=1.0,
                 distance='l_inf'):
     # define KL-loss
-    criterion_kl = nn.KLDivLoss(size_average=False)
+    # MODIFIED: size_average=False 已废弃，改为 reduction='sum'
+    criterion_kl = nn.KLDivLoss(reduction='sum')
     model.eval()
     batch_size = len(x_natural)
     # generate adversarial example
@@ -41,7 +42,8 @@ def trades_loss(model,
             x_adv = torch.clamp(x_adv, 0.0, 1.0)
     elif distance == 'l_2':
         delta = 0.001 * torch.randn(x_natural.shape).cuda().detach()
-        delta = Variable(delta.data, requires_grad=True)
+        # MODIFIED: Variable已废弃，直接用requires_grad=True
+        delta.requires_grad = True
 
         # Setup optimizers
         optimizer_delta = optim.SGD([delta], lr=epsilon / perturb_steps * 2)
@@ -67,12 +69,14 @@ def trades_loss(model,
             delta.data.add_(x_natural)
             delta.data.clamp_(0, 1).sub_(x_natural)
             delta.data.renorm_(p=2, dim=0, maxnorm=epsilon)
-        x_adv = Variable(x_natural + delta, requires_grad=False)
+        # MODIFIED: Variable已废弃，用.detach()代替
+        x_adv = (x_natural + delta).detach()
     else:
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
     model.train()
 
-    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    # MODIFIED: Variable已废弃，用.detach()代替
+    x_adv = torch.clamp(x_adv, 0.0, 1.0).detach()
     # zero gradient
     optimizer.zero_grad()
     # calculate robust loss

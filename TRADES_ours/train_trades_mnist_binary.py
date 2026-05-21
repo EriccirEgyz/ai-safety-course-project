@@ -70,14 +70,16 @@ def get_same_index(target, label_1, label_2):
 
 
 # choose 2 classes - '1', '3'
-idx_train = get_same_index(dataset_train.train_labels, 1, 3)
-dataset_train.train_labels = dataset_train.train_labels[idx_train] - 2
-dataset_train.train_data = dataset_train.train_data[idx_train]
+# MODIFIED: 新版torchvision使用targets代替train_labels
+dataset_train.targets = dataset_train.targets[idx_train] - 2
+idx_train = get_same_index(dataset_train.targets, 1, 3)
+dataset_train.data = dataset_train.data[idx_train]
 
 # choose 2 classes - '1', '3'
-idx_test = get_same_index(dataset_test.test_labels, 1, 3)
-dataset_test.test_labels = dataset_test.test_labels[idx_test] - 2
-dataset_test.test_data = dataset_test.test_data[idx_test]
+# MODIFIED: 新版torchvision使用targets代替test_labels
+dataset_test.targets = dataset_test.targets[idx_test] - 2
+idx_test = get_same_index(dataset_test.targets, 1, 3)
+dataset_test.data = dataset_test.data[idx_test]
 
 # set up dataloader
 train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, shuffle=True, **kwargs)
@@ -140,7 +142,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
 
         # print progress
         if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            print('Train Epoch: {} [{}/{} ({:.0f}%)\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                        100. * batch_idx / len(train_loader), loss.item()))
 

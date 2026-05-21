@@ -91,7 +91,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
 
         # print progress
         if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            print('Train Epoch: {} [{}/{} ({:.0f}%)\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                        100. * batch_idx / len(train_loader), loss.item()))
 
@@ -104,7 +104,8 @@ def eval_train(model, device, train_loader):
         for data, target in train_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            train_loss += F.cross_entropy(output, target, size_average=False).item()
+            # MODIFIED: size_average=False 已废弃，改为 reduction='sum'
+            train_loss += F.cross_entropy(output, target, reduction='sum').item()
             pred = output.max(1, keepdim=True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
     train_loss /= len(train_loader.dataset)
@@ -123,7 +124,8 @@ def eval_test(model, device, test_loader):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += F.cross_entropy(output, target, size_average=False).item()
+            # MODIFIED: size_average=False 已废弃，改为 reduction='sum'
+            test_loss += F.cross_entropy(output, target, reduction='sum').item()
             pred = output.max(1, keepdim=True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
     test_loss /= len(test_loader.dataset)

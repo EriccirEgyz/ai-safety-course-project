@@ -50,11 +50,14 @@ if not os.path.exists(model_dir):
 use_cuda = not args.no_cuda and torch.cuda.is_available()
 torch.manual_seed(args.seed)
 device = torch.device("cuda" if use_cuda else "cpu")
-kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+# MODIFIED: 新版PyTorch不再需要禁用cuDNN，旧版0.4.1的兼容问题已不存在
+use_cuda = not args.no_cuda and torch.cuda.is_available()
+#kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+kwargs = {'num_workers': 0, 'pin_memory': True} if use_cuda else {} # num_workers=0 for Windows, num_workers=1 for Linux
 
 # setup data loader
 train_loader = torch.utils.data.DataLoader(
-    datasets.MNIST('../data', train=True, download=True,
+    datasets.MNIST('../data', train=True, download=False,
                    transform=transforms.ToTensor()),
     batch_size=args.batch_size, shuffle=True, **kwargs)
 
@@ -65,8 +68,11 @@ test_loader = torch.utils.data.DataLoader(
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
+    print("[DEBUG] train() epoch", epoch, "started")
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
+        if batch_idx == 0:
+            print("[DEBUG] First batch loaded, shape:", data.shape)
         data, target = data.to(device), target.to(device)
 
         optimizer.zero_grad()
@@ -86,7 +92,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
 
         # print progress
         if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            print('Train Epoch: {} [{}/{} ({:.0f}%)\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
 
@@ -99,7 +105,8 @@ def eval_train(model, device, train_loader):
         for data, target in train_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            train_loss += F.cross_entropy(output, target, size_average=False).item()
+            # MODIFIED: size_average=False 已废弃，改为 reduction='sum'
+            train_loss += F.cross_entropy(output, target, reduction='sum').item()
             pred = output.max(1, keepdim=True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
     train_loss /= len(train_loader.dataset)
@@ -118,7 +125,8 @@ def eval_test(model, device, test_loader):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += F.cross_entropy(output, target, size_average=False).item()
+            # MODIFIED: size_average=False 已废弃，改为 reduction='sum'
+            test_loss += F.cross_entropy(output, target, reduction='sum').item()
             pred = output.max(1, keepdim=True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
     test_loss /= len(test_loader.dataset)
@@ -143,9 +151,18 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def main():
+    print("[DEBUG] main() started")
+    print("[DEBUG] Device:", device)
+    print("[DEBUG] CUDA available:", torch.cuda.is_available())
+    print("[DEBUG] Train dataset size:", len(train_loader.dataset))
+    print("[DEBUG] Test dataset size:", len(test_loader.dataset))
+
     # init model, Net() can be also used here for training
+    print("[DEBUG] Initializing model...")
     model = SmallCNN().to(device)
+    print("[DEBUG] Model initialized")
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+    print("[DEBUG] Optimizer initialized")
 
     for epoch in range(1, args.epochs + 1):
         # adjust learning rate for SGD
