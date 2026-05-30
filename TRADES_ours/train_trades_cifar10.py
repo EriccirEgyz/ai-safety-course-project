@@ -1,6 +1,7 @@
 from __future__ import print_function
 import os
 import argparse
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,13 +28,13 @@ parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                     help='SGD momentum')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
-parser.add_argument('--epsilon', default=0.031,
+parser.add_argument('--epsilon', type=float, default=0.031,
                     help='perturbation')
-parser.add_argument('--num-steps', default=10,
+parser.add_argument('--num-steps', type=int, default=10,
                     help='perturb number of steps')
-parser.add_argument('--step-size', default=0.007,
+parser.add_argument('--step-size', type=float, default=0.007,
                     help='perturb step size')
-parser.add_argument('--beta', default=6.0,
+parser.add_argument('--beta', type=float, default=6.0,
                     help='regularization, i.e., 1/lambda in TRADES')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
@@ -41,6 +42,7 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--model-dir', default='./model-cifar-wideResNet',
                     help='directory of model for saving checkpoint')
+# Save frequency is counted in epochs, not optimizer steps.
 parser.add_argument('--save-freq', '-s', default=1, type=int, metavar='N',
                     help='save frequency')
 
@@ -154,25 +156,46 @@ def main():
     model = WideResNet().to(device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
+    total_start_time = time.perf_counter()
+    print('Training started at: {}'.format(time.strftime('%Y-%m-%d %H:%M:%S')))
+
     for epoch in range(1, args.epochs + 1):
+        epoch_start_time = time.perf_counter()
+
         # adjust learning rate for SGD
         adjust_learning_rate(optimizer, epoch)
 
         # adversarial training
+        train_start_time = time.perf_counter()
         train(args, model, device, train_loader, optimizer, epoch)
+        train_time = time.perf_counter() - train_start_time
 
         # evaluation on natural examples
+        eval_start_time = time.perf_counter()
         print('================================================================')
         eval_train(model, device, train_loader)
         eval_test(model, device, test_loader)
         print('================================================================')
+        eval_time = time.perf_counter() - eval_start_time
 
         # save checkpoint
-        if epoch % args.save_freq == 0:
+        save_time = 0.0
+        if epoch % args.save_freq == 0 or epoch == args.epochs:
+            save_start_time = time.perf_counter()
             torch.save(model.state_dict(),
                        os.path.join(model_dir, 'model-wideres-epoch{}.pt'.format(epoch)))
             torch.save(optimizer.state_dict(),
                        os.path.join(model_dir, 'opt-wideres-checkpoint_epoch{}.tar'.format(epoch)))
+            save_time = time.perf_counter() - save_start_time
+
+        epoch_time = time.perf_counter() - epoch_start_time
+        elapsed_time = time.perf_counter() - total_start_time
+        print('Time Epoch {}: train {:.2f}s, eval {:.2f}s, save {:.2f}s, epoch {:.2f}s, elapsed {:.2f}s'.format(
+            epoch, train_time, eval_time, save_time, epoch_time, elapsed_time))
+
+    total_time = time.perf_counter() - total_start_time
+    print('Training finished at: {}'.format(time.strftime('%Y-%m-%d %H:%M:%S')))
+    print('Total training time: {:.2f}s ({:.2f}h)'.format(total_time, total_time / 3600.0))
 
 
 if __name__ == '__main__':

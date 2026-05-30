@@ -12,6 +12,8 @@ __pycache__/
 model-*/
 model_*/
 checkpoints/
+**/model-cifar-wideResNet/
+**/checkpoints/
 
 # === Datasets (large files, do not commit) ===
 data/
@@ -32,3 +34,5 @@ Thumbs.db
 
 # === Logs ===
 *.log
+logs/
+**/logs/
