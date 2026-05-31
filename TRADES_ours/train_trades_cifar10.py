@@ -36,6 +36,10 @@ parser.add_argument('--step-size', type=float, default=0.007,
                     help='perturb step size')
 parser.add_argument('--beta', type=float, default=6.0,
                     help='regularization, i.e., 1/lambda in TRADES')
+parser.add_argument('--margin-tau', type=float, default=0.3,
+                    help='margin threshold tau for margin-based beta_i')
+parser.add_argument('--margin-temperature', type=float, default=0.15,
+                    help='temperature T for margin-based beta_i')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
@@ -87,7 +91,9 @@ def train(args, model, device, train_loader, optimizer, epoch):
                            step_size=args.step_size,
                            epsilon=args.epsilon,
                            perturb_steps=args.num_steps,
-                           beta=args.beta)
+                           beta=args.beta,
+                           margin_tau=args.margin_tau,
+                           margin_temperature=args.margin_temperature)
         loss.backward()
         optimizer.step()
 

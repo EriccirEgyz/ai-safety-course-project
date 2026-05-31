@@ -22,8 +22,6 @@ def trades_loss(model,
                 epsilon=0.031,
                 perturb_steps=10,
                 beta=1.0,
-                margin_tau=0.0,
-                margin_temperature=1.0,
                 distance='l_inf'):
     # define KL-loss
     # MODIFIED: size_average=False 已废弃，改为 reduction='sum'
@@ -84,26 +82,7 @@ def trades_loss(model,
     # calculate robust loss
     logits = model(x_natural)
     loss_natural = F.cross_entropy(logits, y)
-    logits_adv = model(x_adv)
-
-    # MODIFIED: Use a margin-based per-sample beta_i instead of a fixed batch-level beta.
-    # The clean margin is defined as the true-class logit minus the largest non-true-class logit.
-    # Samples with larger clean margins are better separated, so they receive stronger robustness regularization.
-    true_logits = logits.gather(1, y.view(-1, 1)).squeeze(1)
-    other_logits = logits.masked_fill(F.one_hot(y, num_classes=logits.size(1)).bool(), float('-inf'))
-    max_other_logits = other_logits.max(dim=1)[0]
-    margins = true_logits - max_other_logits
-
-    # MODIFIED: Detach beta_i so the model cannot reduce its loss by directly manipulating beta weights.
-    # tau shifts the margin threshold, and temperature controls how sharply margins are mapped to weights.
-    # Normalize beta_i to keep the batch-average regularization strength equal to the original beta.
-    with torch.no_grad():
-        margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
-        beta_i = float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
-
-    robust_kl = F.kl_div(F.log_softmax(logits_adv, dim=1),
-                         F.softmax(logits, dim=1),
-                         reduction='none').sum(dim=1)
-    loss_robust = torch.mean(beta_i * robust_kl)
-    loss = loss_natural + loss_robust
+    loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),
+                                                    F.softmax(model(x_natural), dim=1))
+    loss = loss_natural + beta * loss_robust
     return loss
