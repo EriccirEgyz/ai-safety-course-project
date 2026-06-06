@@ -2,6 +2,7 @@ from __future__ import print_function
 import os
 import argparse
 import time
+import csv
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -46,6 +47,8 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--model-dir', default='./model-cifar-wideResNet',
                     help='directory of model for saving checkpoint')
+parser.add_argument('--metrics-file', default=None,
+                    help='CSV file for epoch-level margin/beta_i metrics')
 # Save frequency is counted in epochs, not optimizer steps.
 parser.add_argument('--save-freq', '-s', default=1, type=int, metavar='N',
                     help='save frequency')
@@ -76,24 +79,62 @@ testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=Tru
 test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, **kwargs)
 
 
+def aggregate_batch_stats(batch_stats):
+    total_samples = sum(item['num_samples'] for item in batch_stats)
+    summary = {}
+    weighted_fields = ['loss_total', 'loss_natural', 'loss_robust']
+    for field in weighted_fields:
+        summary[field] = sum(item[field] * item['num_samples'] for item in batch_stats) / total_samples
+    summary.update(summarize_values('margin', [item['margin_values'] for item in batch_stats]))
+    summary.update(summarize_values('beta_i', [item['beta_i_values'] for item in batch_stats]))
+    return summary
+
+
+def summarize_values(prefix, tensors):
+    values = torch.cat(tensors).float()
+    sorted_values = torch.sort(values)[0]
+    last_idx = values.numel() - 1
+    return {
+        prefix + '_mean': values.mean().item(),
+        prefix + '_std': values.std(unbiased=False).item(),
+        prefix + '_min': values.min().item(),
+        prefix + '_max': values.max().item(),
+        prefix + '_p10': sorted_values[int(0.10 * last_idx)].item(),
+        prefix + '_p50': sorted_values[int(0.50 * last_idx)].item(),
+        prefix + '_p90': sorted_values[int(0.90 * last_idx)].item(),
+    }
+
+
+def append_metrics_row(metrics_path, row):
+    file_exists = os.path.exists(metrics_path)
+    with open(metrics_path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+
+
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
+    batch_stats = []
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
 
         optimizer.zero_grad()
 
         # calculate robust loss
-        loss = trades_loss(model=model,
-                           x_natural=data,
-                           y=target,
-                           optimizer=optimizer,
-                           step_size=args.step_size,
-                           epsilon=args.epsilon,
-                           perturb_steps=args.num_steps,
-                           beta=args.beta,
-                           margin_tau=args.margin_tau,
-                           margin_temperature=args.margin_temperature)
+        loss, stats = trades_loss(model=model,
+                                  x_natural=data,
+                                  y=target,
+                                  optimizer=optimizer,
+                                  step_size=args.step_size,
+                                  epsilon=args.epsilon,
+                                  perturb_steps=args.num_steps,
+                                  beta=args.beta,
+                                  margin_tau=args.margin_tau,
+                                  margin_temperature=args.margin_temperature,
+                                  return_stats=True)
+        batch_stats.append(stats)
         loss.backward()
         optimizer.step()
 
@@ -102,6 +143,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
             print('Train Epoch: {} [{}/{} ({:.0f}%)\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                        100. * batch_idx / len(train_loader), loss.item()))
+    return aggregate_batch_stats(batch_stats)
 
 
 def eval_train(model, device, train_loader):
@@ -161,9 +203,11 @@ def main():
     # init model, ResNet18() can be also used here for training
     model = WideResNet().to(device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    metrics_path = args.metrics_file or os.path.join(model_dir, 'margin_beta_metrics.csv')
 
     total_start_time = time.perf_counter()
     print('Training started at: {}'.format(time.strftime('%Y-%m-%d %H:%M:%S')))
+    print('Metrics CSV: {}'.format(metrics_path))
 
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.perf_counter()
@@ -173,14 +217,14 @@ def main():
 
         # adversarial training
         train_start_time = time.perf_counter()
-        train(args, model, device, train_loader, optimizer, epoch)
+        training_stats = train(args, model, device, train_loader, optimizer, epoch)
         train_time = time.perf_counter() - train_start_time
 
         # evaluation on natural examples
         eval_start_time = time.perf_counter()
         print('================================================================')
-        eval_train(model, device, train_loader)
-        eval_test(model, device, test_loader)
+        clean_train_loss, clean_train_acc = eval_train(model, device, train_loader)
+        clean_test_loss, clean_test_acc = eval_test(model, device, test_loader)
         print('================================================================')
         eval_time = time.perf_counter() - eval_start_time
 
@@ -196,6 +240,32 @@ def main():
 
         epoch_time = time.perf_counter() - epoch_start_time
         elapsed_time = time.perf_counter() - total_start_time
+        row = {
+            'epoch': epoch,
+            'lr': optimizer.param_groups[0]['lr'],
+            'clean_train_loss': clean_train_loss,
+            'clean_train_acc': clean_train_acc,
+            'clean_test_loss': clean_test_loss,
+            'clean_test_acc': clean_test_acc,
+            'train_time_sec': train_time,
+            'eval_time_sec': eval_time,
+            'save_time_sec': save_time,
+            'epoch_time_sec': epoch_time,
+            'elapsed_time_sec': elapsed_time,
+        }
+        row.update(training_stats)
+        append_metrics_row(metrics_path, row)
+        print('Margin/Beta Epoch {}: margin mean {:.4f}, p10 {:.4f}, p50 {:.4f}, p90 {:.4f}; '
+              'beta_i mean {:.4f}, std {:.4f}, min {:.4f}, max {:.4f}'.format(
+                  epoch,
+                  training_stats['margin_mean'],
+                  training_stats['margin_p10'],
+                  training_stats['margin_p50'],
+                  training_stats['margin_p90'],
+                  training_stats['beta_i_mean'],
+                  training_stats['beta_i_std'],
+                  training_stats['beta_i_min'],
+                  training_stats['beta_i_max']))
         print('Time Epoch {}: train {:.2f}s, eval {:.2f}s, save {:.2f}s, epoch {:.2f}s, elapsed {:.2f}s'.format(
             epoch, train_time, eval_time, save_time, epoch_time, elapsed_time))
 
