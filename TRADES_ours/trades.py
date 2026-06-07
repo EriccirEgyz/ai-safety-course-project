@@ -39,6 +39,8 @@ def trades_loss(model,
                 beta=1.0,
                 margin_tau=0.0,
                 margin_temperature=1.0,
+                beta_i_min=1.0,
+                beta_i_max=10.0,
                 distance='l_inf',
                 return_stats=False):
     # define KL-loss
@@ -113,9 +115,11 @@ def trades_loss(model,
     # MODIFIED: Detach beta_i so the model cannot reduce its loss by directly manipulating beta weights.
     # tau shifts the margin threshold, and temperature controls how sharply margins are mapped to weights.
     # Normalize beta_i to keep the batch-average regularization strength equal to the original beta.
+    # Clip beta_i to the common TRADES beta range to avoid unstable extreme per-sample weights.
     with torch.no_grad():
         margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
         beta_i = float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
+        beta_i = torch.clamp(beta_i, min=beta_i_min, max=beta_i_max)
 
     robust_kl = F.kl_div(F.log_softmax(logits_adv, dim=1),
                          F.softmax(logits, dim=1),

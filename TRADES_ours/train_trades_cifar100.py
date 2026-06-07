@@ -41,6 +41,10 @@ parser.add_argument('--margin-tau', type=float, default=0.3,
                     help='margin threshold tau for margin-based beta_i')
 parser.add_argument('--margin-temperature', type=float, default=0.15,
                     help='temperature T for margin-based beta_i')
+parser.add_argument('--beta-i-min', type=float, default=1.0,
+                    help='lower bound for clipped per-sample beta_i')
+parser.add_argument('--beta-i-max', type=float, default=10.0,
+                    help='upper bound for clipped per-sample beta_i')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
@@ -133,6 +137,8 @@ def train(args, model, device, train_loader, optimizer, epoch):
                                   beta=args.beta,
                                   margin_tau=args.margin_tau,
                                   margin_temperature=args.margin_temperature,
+                                  beta_i_min=args.beta_i_min,
+                                  beta_i_max=args.beta_i_max,
                                   return_stats=True)
         batch_stats.append(stats)
         loss.backward()
@@ -247,6 +253,11 @@ def main():
             'clean_train_acc': clean_train_acc,
             'clean_test_loss': clean_test_loss,
             'clean_test_acc': clean_test_acc,
+            'beta': args.beta,
+            'margin_tau': args.margin_tau,
+            'margin_temperature': args.margin_temperature,
+            'beta_i_min_bound': args.beta_i_min,
+            'beta_i_max_bound': args.beta_i_max,
             'train_time_sec': train_time,
             'eval_time_sec': eval_time,
             'save_time_sec': save_time,
