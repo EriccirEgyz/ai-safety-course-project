@@ -14,11 +14,13 @@ def l2_norm(x):
     return squared_l2_norm(x).sqrt()
 
 
-def compute_beta_i(margins, beta, margin_tau=0.0, margin_temperature=1.0):
+def compute_beta_i(margins, beta, margin_tau=0.3, margin_temperature=0.15):
     # Per-sample robustness weight from clean margins (Design A):
     #   beta_i = beta * sigmoid((m_i - tau) / T) / mean_batch sigmoid((m_j - tau) / T)
     # Larger clean margin -> stronger robustness regularization.
     # Wrapped in no_grad so the model cannot lower the loss by directly manipulating beta_i.
+    # Defaults match the production CLI defaults in train_trades_cifar10.py
+    # (--margin-tau 0.3 --margin-temperature 0.15).
     with torch.no_grad():
         margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
         return float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
