@@ -14,6 +14,16 @@ def l2_norm(x):
     return squared_l2_norm(x).sqrt()
 
 
+def compute_beta_i(margins, beta, margin_tau=0.0, margin_temperature=1.0):
+    # Per-sample robustness weight from clean margins (Design A):
+    #   beta_i = beta * sigmoid((m_i - tau) / T) / mean_batch sigmoid((m_j - tau) / T)
+    # Larger clean margin -> stronger robustness regularization.
+    # Wrapped in no_grad so the model cannot lower the loss by directly manipulating beta_i.
+    with torch.no_grad():
+        margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
+        return float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
+
+
 def trades_loss(model,
                 x_natural,
                 y,
@@ -94,12 +104,9 @@ def trades_loss(model,
     max_other_logits = other_logits.max(dim=1)[0]
     margins = true_logits - max_other_logits
 
-    # MODIFIED: Detach beta_i so the model cannot reduce its loss by directly manipulating beta weights.
-    # tau shifts the margin threshold, and temperature controls how sharply margins are mapped to weights.
-    # Normalize beta_i to keep the batch-average regularization strength equal to the original beta.
-    with torch.no_grad():
-        margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
-        beta_i = float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
+    beta_i = compute_beta_i(margins, beta,
+                            margin_tau=margin_tau,
+                            margin_temperature=margin_temperature)
 
     robust_kl = F.kl_div(F.log_softmax(logits_adv, dim=1),
                          F.softmax(logits, dim=1),
