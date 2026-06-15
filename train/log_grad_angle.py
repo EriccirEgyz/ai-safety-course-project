@@ -190,15 +190,15 @@ def compute_per_sample_grad_angles(model, x_nat, x_adv, y, sampled_idx):
         n = int(idx.shape[0])
         for i in range(n):
             ce_i = F.cross_entropy(logits_adv[i:i + 1], y_sub[i:i + 1], reduction='sum')
-            grad_ce = torch.autograd.grad(ce_i, params, retain_graph=True)
+            grad_ce = torch.autograd.grad(ce_i, params, retain_graph=True, allow_unused=True)
 
             p_nat_i = F.softmax(logits_nat[i:i + 1], dim=1)
             log_p_adv_i = F.log_softmax(logits_adv[i:i + 1], dim=1)
             kl_i = F.kl_div(log_p_adv_i, p_nat_i, reduction='sum')
-            grad_kl = torch.autograd.grad(kl_i, params, retain_graph=True)
+            grad_kl = torch.autograd.grad(kl_i, params, retain_graph=True, allow_unused=True)
 
-            g_ce_flat = torch.cat([g.detach().reshape(-1) for g in grad_ce])
-            g_kl_flat = torch.cat([g.detach().reshape(-1) for g in grad_kl])
+            g_ce_flat = torch.cat([(g if g is not None else torch.zeros_like(p)).detach().reshape(-1) for g, p in zip(grad_ce, params)])
+            g_kl_flat = torch.cat([(g if g is not None else torch.zeros_like(p)).detach().reshape(-1) for g, p in zip(grad_kl, params)])
             cos = (g_ce_flat * g_kl_flat).sum() / \
                   (g_ce_flat.norm() * g_kl_flat.norm() + 1e-12)
             cos_phis.append(float(cos.item()))
@@ -212,7 +212,7 @@ def stratified_sample(bin_idx, num_bins, k):
     """Up to k indices spread evenly across the num_bins bins present in bin_idx.
     Returns a 1D LongTensor of indices into the batch (CPU)."""
     if k <= 0:
-        return torch.empty(0, dtype=torch.long)
+        return torch.empty(0, dtype=torch.long, device=bin_idx.device)
     per_bin = max(1, k // num_bins)
     out = []
     for b in range(num_bins):
@@ -220,20 +220,20 @@ def stratified_sample(bin_idx, num_bins, k):
         if idx_b.numel() == 0:
             continue
         take = min(per_bin, idx_b.numel())
-        perm = torch.randperm(idx_b.numel())[:take]
+        perm = torch.randperm(idx_b.numel(), device=bin_idx.device)[:take]
         out.append(idx_b[perm])
     if not out:
-        return torch.empty(0, dtype=torch.long)
+        return torch.empty(0, dtype=torch.long, device=bin_idx.device)
     sampled = torch.cat(out)
     # Top up to k from any remaining unsampled index.
     if sampled.numel() < k:
         remaining = k - sampled.numel()
-        mask = torch.ones(bin_idx.numel(), dtype=torch.bool)
+        mask = torch.ones(bin_idx.numel(), dtype=torch.bool, device=bin_idx.device)
         mask[sampled] = False
         avail = torch.nonzero(mask, as_tuple=False).reshape(-1)
         if avail.numel() > 0:
             take = min(remaining, avail.numel())
-            perm = torch.randperm(avail.numel())[:take]
+            perm = torch.randperm(avail.numel(), device=bin_idx.device)[:take]
             sampled = torch.cat([sampled, avail[perm]])
     return sampled[:k]
 
