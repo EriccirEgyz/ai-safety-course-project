@@ -29,6 +29,18 @@ def l2_norm(x):
     return squared_l2_norm(x).sqrt()
 
 
+def compute_beta_i(margins, beta, margin_tau=0.3, margin_temperature=0.15):
+    # Per-sample robustness weight from clean margins (Design A):
+    #   beta_i = beta * sigmoid((m_i - tau) / T) / mean_batch sigmoid((m_j - tau) / T)
+    # Larger clean margin -> stronger robustness regularization.
+    # Wrapped in no_grad so the model cannot lower the loss by directly manipulating beta_i.
+    # Defaults match the production CLI defaults in train_trades_cifar10.py
+    # (--margin-tau 0.3 --margin-temperature 0.15).
+    with torch.no_grad():
+        margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
+        return float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
+
+
 def trades_loss(model,
                 x_natural,
                 y,
@@ -112,13 +124,13 @@ def trades_loss(model,
     max_other_logits = other_logits.max(dim=1)[0]
     margins = true_logits - max_other_logits
 
-    # MODIFIED: Detach beta_i so the model cannot reduce its loss by directly manipulating beta weights.
-    # tau shifts the margin threshold, and temperature controls how sharply margins are mapped to weights.
-    # Normalize beta_i to keep the batch-average regularization strength equal to the original beta.
-    # Clip beta_i to the common TRADES beta range to avoid unstable extreme per-sample weights.
+    # MODIFIED: Per-sample beta_i with stop-gradient (so the model cannot game
+    # the loss by manipulating beta through the margin path) and clamp to a
+    # safe band so extreme samples can't blow up regularization strength.
     with torch.no_grad():
-        margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
-        beta_i = float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
+        beta_i = compute_beta_i(margins, beta,
+                                margin_tau=margin_tau,
+                                margin_temperature=margin_temperature)
         beta_i = torch.clamp(beta_i, min=beta_i_min, max=beta_i_max)
 
     robust_kl = F.kl_div(F.log_softmax(logits_adv, dim=1),
