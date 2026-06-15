@@ -4,6 +4,21 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 
+def tensor_stats(x):
+    values = x.detach().float().view(-1).cpu()
+    sorted_values = torch.sort(values)[0]
+    last_idx = values.numel() - 1
+    return {
+        'mean': values.mean().item(),
+        'std': values.std(unbiased=False).item(),
+        'min': values.min().item(),
+        'max': values.max().item(),
+        'p10': sorted_values[int(0.10 * last_idx)].item(),
+        'p50': sorted_values[int(0.50 * last_idx)].item(),
+        'p90': sorted_values[int(0.90 * last_idx)].item(),
+    }
+
+
 def squared_l2_norm(x):
     # MODIFIED: x.unsqueeze(0).shape[0] -> x.shape[0], Variable已废弃，直接用tensor
     flattened = x.view(x.shape[0], -1)
@@ -36,7 +51,10 @@ def trades_loss(model,
                 beta=1.0,
                 margin_tau=0.0,
                 margin_temperature=1.0,
-                distance='l_inf'):
+                beta_i_min=1.0,
+                beta_i_max=10.0,
+                distance='l_inf',
+                return_stats=False):
     # define KL-loss
     # MODIFIED: size_average=False 已废弃，改为 reduction='sum'
     criterion_kl = nn.KLDivLoss(reduction='sum')
@@ -106,13 +124,42 @@ def trades_loss(model,
     max_other_logits = other_logits.max(dim=1)[0]
     margins = true_logits - max_other_logits
 
-    beta_i = compute_beta_i(margins, beta,
-                            margin_tau=margin_tau,
-                            margin_temperature=margin_temperature)
+    # MODIFIED: Per-sample beta_i with stop-gradient (so the model cannot game
+    # the loss by manipulating beta through the margin path) and clamp to a
+    # safe band so extreme samples can't blow up regularization strength.
+    with torch.no_grad():
+        beta_i = compute_beta_i(margins, beta,
+                                margin_tau=margin_tau,
+                                margin_temperature=margin_temperature)
+        beta_i = torch.clamp(beta_i, min=beta_i_min, max=beta_i_max)
 
     robust_kl = F.kl_div(F.log_softmax(logits_adv, dim=1),
                          F.softmax(logits, dim=1),
                          reduction='none').sum(dim=1)
     loss_robust = torch.mean(beta_i * robust_kl)
     loss = loss_natural + loss_robust
+    if return_stats:
+        margin_stats = tensor_stats(margins)
+        beta_stats = tensor_stats(beta_i)
+        stats = {
+            'num_samples': batch_size,
+            'loss_total': loss.detach().item(),
+            'loss_natural': loss_natural.detach().item(),
+            'loss_robust': loss_robust.detach().item(),
+            'margin_mean': margin_stats['mean'],
+            'margin_std': margin_stats['std'],
+            'margin_p10': margin_stats['p10'],
+            'margin_p50': margin_stats['p50'],
+            'margin_p90': margin_stats['p90'],
+            'beta_i_mean': beta_stats['mean'],
+            'beta_i_std': beta_stats['std'],
+            'beta_i_min': beta_stats['min'],
+            'beta_i_max': beta_stats['max'],
+            'beta_i_p10': beta_stats['p10'],
+            'beta_i_p50': beta_stats['p50'],
+            'beta_i_p90': beta_stats['p90'],
+            'margin_values': margins.detach().float().cpu(),
+            'beta_i_values': beta_i.detach().float().cpu(),
+        }
+        return loss, stats
     return loss
