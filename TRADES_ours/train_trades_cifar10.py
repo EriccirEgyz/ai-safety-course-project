@@ -37,6 +37,11 @@ parser.add_argument('--step-size', type=float, default=0.007,
                     help='perturb step size')
 parser.add_argument('--beta', type=float, default=6.0,
                     help='regularization, i.e., 1/lambda in TRADES')
+parser.add_argument('--beta-schedule', type=str, default='margin_easy',
+                    choices=['fixed', 'margin_easy', 'margin_hard'],
+                    help='beta scheduling strategy: fixed (original TRADES), '
+                         'margin_easy (higher beta for easy samples), '
+                         'margin_hard (higher beta for hard samples)')
 parser.add_argument('--margin-tau', type=float, default=0.3,
                     help='margin threshold tau for margin-based beta_i')
 parser.add_argument('--margin-temperature', type=float, default=0.15,
@@ -89,7 +94,18 @@ def aggregate_batch_stats(batch_stats):
     weighted_fields = ['loss_total', 'loss_natural', 'loss_robust']
     for field in weighted_fields:
         summary[field] = sum(item[field] * item['num_samples'] for item in batch_stats) / total_samples
-    summary.update(summarize_values('margin', [item['margin_values'] for item in batch_stats]))
+
+    # Handle margin stats (only present in margin-based schedules)
+    margin_tensors = [item['margin_values'] for item in batch_stats if item['margin_values'] is not None]
+    if margin_tensors:
+        summary.update(summarize_values('margin', margin_tensors))
+    else:
+        # Fixed schedule: no margin stats
+        summary.update({
+            'margin_mean': 0.0, 'margin_std': 0.0, 'margin_min': 0.0, 'margin_max': 0.0,
+            'margin_p10': 0.0, 'margin_p50': 0.0, 'margin_p90': 0.0
+        })
+
     summary.update(summarize_values('beta_i', [item['beta_i_values'] for item in batch_stats]))
     return summary
 
@@ -135,6 +151,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
                                   epsilon=args.epsilon,
                                   perturb_steps=args.num_steps,
                                   beta=args.beta,
+                                  beta_schedule=args.beta_schedule,
                                   margin_tau=args.margin_tau,
                                   margin_temperature=args.margin_temperature,
                                   beta_i_min=args.beta_i_min,
@@ -254,6 +271,7 @@ def main():
             'clean_test_loss': clean_test_loss,
             'clean_test_acc': clean_test_acc,
             'beta': args.beta,
+            'beta_schedule': args.beta_schedule,
             'margin_tau': args.margin_tau,
             'margin_temperature': args.margin_temperature,
             'beta_i_min_bound': args.beta_i_min,

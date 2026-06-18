@@ -37,6 +37,7 @@ def trades_loss(model,
                 epsilon=0.031,
                 perturb_steps=10,
                 beta=1.0,
+                beta_schedule='margin_easy',
                 margin_tau=0.0,
                 margin_temperature=1.0,
                 beta_i_min=1.0,
@@ -104,22 +105,40 @@ def trades_loss(model,
     loss_natural = F.cross_entropy(logits, y)
     logits_adv = model(x_adv)
 
-    # MODIFIED: Use a margin-based per-sample beta_i instead of a fixed batch-level beta.
-    # The clean margin is defined as the true-class logit minus the largest non-true-class logit.
-    # Samples with larger clean margins are better separated, so they receive stronger robustness regularization.
-    true_logits = logits.gather(1, y.view(-1, 1)).squeeze(1)
-    other_logits = logits.masked_fill(F.one_hot(y, num_classes=logits.size(1)).bool(), float('-inf'))
-    max_other_logits = other_logits.max(dim=1)[0]
-    margins = true_logits - max_other_logits
+    # MODIFIED: Support three beta scheduling strategies:
+    # - 'fixed': Original TRADES with constant beta (no per-sample adaptation)
+    # - 'margin_easy': Higher beta for easy samples (large margin) - protects already-correct samples
+    # - 'margin_hard': Higher beta for hard samples (small margin) - hard example mining
 
-    # MODIFIED: Detach beta_i so the model cannot reduce its loss by directly manipulating beta weights.
-    # tau shifts the margin threshold, and temperature controls how sharply margins are mapped to weights.
-    # Normalize beta_i to keep the batch-average regularization strength equal to the original beta.
-    # Clip beta_i to the common TRADES beta range to avoid unstable extreme per-sample weights.
-    with torch.no_grad():
-        margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
-        beta_i = float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
-        beta_i = torch.clamp(beta_i, min=beta_i_min, max=beta_i_max)
+    if beta_schedule == 'fixed':
+        # Original TRADES: uniform beta across all samples
+        beta_i = torch.full((batch_size,), float(beta), device=x_natural.device)
+
+    elif beta_schedule in ['margin_easy', 'margin_hard']:
+        # Compute clean margin: true-class logit minus largest non-true-class logit
+        true_logits = logits.gather(1, y.view(-1, 1)).squeeze(1)
+        other_logits = logits.masked_fill(F.one_hot(y, num_classes=logits.size(1)).bool(), float('-inf'))
+        max_other_logits = other_logits.max(dim=1)[0]
+        margins = true_logits - max_other_logits
+
+        # Detach beta_i so the model cannot reduce its loss by directly manipulating beta weights.
+        # tau shifts the margin threshold, and temperature controls how sharply margins are mapped to weights.
+        # Normalize beta_i to keep the batch-average regularization strength equal to the original beta.
+        # Clip beta_i to the common TRADES beta range to avoid unstable extreme per-sample weights.
+        with torch.no_grad():
+            if beta_schedule == 'margin_easy':
+                # Easy samples (large margin) get higher beta
+                margin_weights = torch.sigmoid((margins - margin_tau) / margin_temperature)
+            else:  # 'margin_hard'
+                # Hard samples (small margin) get higher beta - REVERSED strategy
+                margin_weights = torch.sigmoid((margin_tau - margins) / margin_temperature)
+
+            beta_i = float(beta) * margin_weights / (margin_weights.mean() + 1e-12)
+            beta_i = torch.clamp(beta_i, min=beta_i_min, max=beta_i_max)
+
+    else:
+        raise ValueError(f"Unknown beta_schedule: '{beta_schedule}'. "
+                        f"Must be one of: 'fixed', 'margin_easy', 'margin_hard'.")
 
     robust_kl = F.kl_div(F.log_softmax(logits_adv, dim=1),
                          F.softmax(logits, dim=1),
@@ -127,7 +146,16 @@ def trades_loss(model,
     loss_robust = torch.mean(beta_i * robust_kl)
     loss = loss_natural + loss_robust
     if return_stats:
-        margin_stats = tensor_stats(margins)
+        # Compute margin stats (only if margin-based schedule is used)
+        if beta_schedule in ['margin_easy', 'margin_hard']:
+            true_logits = logits.gather(1, y.view(-1, 1)).squeeze(1)
+            other_logits = logits.masked_fill(F.one_hot(y, num_classes=logits.size(1)).bool(), float('-inf'))
+            max_other_logits = other_logits.max(dim=1)[0]
+            margins = true_logits - max_other_logits
+            margin_stats = tensor_stats(margins)
+        else:
+            margin_stats = {'mean': 0.0, 'std': 0.0, 'p10': 0.0, 'p50': 0.0, 'p90': 0.0}
+
         beta_stats = tensor_stats(beta_i)
         stats = {
             'num_samples': batch_size,
@@ -146,7 +174,7 @@ def trades_loss(model,
             'beta_i_p10': beta_stats['p10'],
             'beta_i_p50': beta_stats['p50'],
             'beta_i_p90': beta_stats['p90'],
-            'margin_values': margins.detach().float().cpu(),
+            'margin_values': margins.detach().float().cpu() if beta_schedule in ['margin_easy', 'margin_hard'] else None,
             'beta_i_values': beta_i.detach().float().cpu(),
         }
         return loss, stats
