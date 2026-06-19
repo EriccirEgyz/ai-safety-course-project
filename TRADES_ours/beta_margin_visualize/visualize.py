@@ -118,12 +118,12 @@ def plot_beta_margin_correlation(margins, betas_dict, output_path, epoch):
         ax.scatter(margins, beta_values, alpha=0.3, s=10, color=color, edgecolors='none')
 
         # 标题和标注
-        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.set_title(title, fontsize=14, fontweight='bold')
         ax.grid(alpha=0.3)
         ax.set_ylim([0, 11])
 
-    fig.supxlabel('Clean margin', fontsize=11)
-    fig.supylabel(r'Weight $\beta_i$', fontsize=11)
+    fig.supxlabel('Clean margin', fontsize=16, fontweight='bold')
+    fig.supylabel(r'Weight $\beta_i$', fontsize=16, fontweight='bold')
     plt.tight_layout(rect=[0.03, 0.05, 1.0, 1.0])
     plt.savefig(output_path, bbox_inches='tight')
     print(f'✓ Figure saved: {output_path}')
