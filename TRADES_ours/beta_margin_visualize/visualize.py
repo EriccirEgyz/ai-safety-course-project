@@ -17,7 +17,6 @@ import torchvision.datasets as datasets
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
-from scipy.signal import savgol_filter
 import sys
 import os
 
@@ -28,7 +27,7 @@ from models.wideresnet import WideResNet
 plt.rcParams['figure.dpi'] = 300
 plt.rcParams['savefig.dpi'] = 300
 plt.rcParams['font.size'] = 10
-plt.rcParams['font.sans-serif'] = ['Arial']
+plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
 
 def compute_margins(model, loader, device):
@@ -117,19 +116,6 @@ def plot_beta_margin_correlation(margins, betas_dict, output_path, epoch):
 
         # 散点图
         ax.scatter(margins, beta_values, alpha=0.3, s=10, color=color, edgecolors='none')
-
-        # 趋势线（使用排序后的数据绘制平滑曲线）
-        sorted_indices = np.argsort(margins)
-        sorted_margins = margins[sorted_indices]
-        sorted_betas = beta_values[sorted_indices]
-
-        # 使用滑动窗口平均绘制趋势
-        if len(sorted_margins) > 50:
-            window = max(51, len(sorted_margins) // 20)
-            if window % 2 == 0:
-                window += 1
-            smoothed_betas = savgol_filter(sorted_betas, window_length=window, polyorder=3)
-            ax.plot(sorted_margins, smoothed_betas, color='black', linewidth=2, alpha=0.8)
 
         # 标题和标注
         ax.set_title(title, fontsize=12, fontweight='bold')
