@@ -238,15 +238,16 @@ def main():
     # 加载数据集
     transform = transforms.Compose([transforms.ToTensor()])
     if args.dataset == 'cifar10':
-        testset = datasets.CIFAR10(root='../data', train=False, download=True, transform=transform)
+        testset = datasets.CIFAR10(root='../../data', train=False, download=False, transform=transform)
         num_classes = 10
     else:
-        testset = datasets.CIFAR100(root='../data', train=False, download=True, transform=transform)
+        testset = datasets.CIFAR100(root='../../data', train=False, download=False, transform=transform)
         num_classes = 100
 
     testloader = DataLoader(testset, batch_size=200, shuffle=False, num_workers=2)
 
     print(f'\nDataset: {args.dataset.upper()}, Num samples: {len(testset)}')
+    print('Data directory: ../../data')
 
     # ==================== Step 1: 用 Fixed 模型定义分层 ====================
     print('\n' + '='*80)
@@ -308,6 +309,7 @@ def main():
             'dataset': args.dataset,
             'num_quantiles': args.num_quantiles,
             'strata_method': 'fixed',  # 标记使用了固定分层
+            'data_dir': '../../data',
             'checkpoints': {
                 'fixed': args.fixed,
                 'margin_easy': args.easy,

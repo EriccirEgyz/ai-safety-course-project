@@ -220,10 +220,10 @@ def main():
     # 加载数据集
     transform = transforms.Compose([transforms.ToTensor()])
     if args.dataset == 'cifar10':
-        testset = datasets.CIFAR10(root='../data', train=False, download=True, transform=transform)
+        testset = datasets.CIFAR10(root='../../data', train=False, download=False, transform=transform)
         num_classes = 10
     else:
-        testset = datasets.CIFAR100(root='../data', train=False, download=True, transform=transform)
+        testset = datasets.CIFAR100(root='../../data', train=False, download=False, transform=transform)
         num_classes = 100
 
     # 随机抽样
@@ -233,6 +233,7 @@ def main():
     loader = DataLoader(subset, batch_size=200, shuffle=False, num_workers=2)
 
     print(f'\nDataset: {args.dataset.upper()}')
+    print('Data directory: ../../data')
     print(f'Total test samples: {total_samples}')
     print(f'Analyzing {args.num_samples} randomly sampled images')
     print(f'Seed: {args.seed}')
