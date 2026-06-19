@@ -13,16 +13,16 @@ from models.resnet import *
 try:
     from autoattack import AutoAttack
 except ImportError:
-    print("Error: autoattack not installed. Please run: pip install autoattack")
+    print("Error: autoattack not installed. Please run: pip install git+https://github.com/fra31/auto-attack")
     exit(1)
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR100 AutoAttack Evaluation')
-parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
-                    help='input batch size for testing (default: 128)')
+parser.add_argument('--test-batch-size', type=int, default=200, metavar='N',
+                    help='input batch size for testing and AutoAttack (default: 200)')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
-parser.add_argument('--epsilon', default=0.031,
+parser.add_argument('--epsilon', type=float, default=0.031,
                     help='perturbation')
 parser.add_argument('--model-path',
                     default='./checkpoints/model_cifar100_wrn.pt',
@@ -45,37 +45,52 @@ test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_si
 
 def eval_adv_test_autoattack(model, device, test_loader):
     """
-    evaluate model by AutoAttack
+    evaluate model by AutoAttack (batch-wise to avoid OOM)
     """
     model.eval()
 
-    # Prepare data
-    x_test = []
-    y_test = []
-    for data, target in test_loader:
-        x_test.append(data)
-        y_test.append(target)
+    natural_err_total = 0
+    robust_err_total = 0
+    total_samples = 0
 
-    x_test = torch.cat(x_test, dim=0).to(device)
-    y_test = torch.cat(y_test, dim=0).to(device)
-
-    # Natural accuracy
-    with torch.no_grad():
-        out = model(x_test)
-        natural_err_total = (out.data.max(1)[1] != y_test.data).float().sum()
-
-    # AutoAttack
-    print('running AutoAttack...')
+    # Initialize AutoAttack once
+    print('Initializing AutoAttack...')
     adversary = AutoAttack(model, norm='Linf', eps=args.epsilon, version=args.version, device=device)
-    x_adv = adversary.run_standard_evaluation(x_test, y_test, bs=args.test_batch_size)
 
-    # Robust accuracy
-    with torch.no_grad():
-        out_adv = model(x_adv)
-        robust_err_total = (out_adv.data.max(1)[1] != y_test.data).float().sum()
+    # Process the test set batch by batch to avoid evaluating all 10k samples at once.
+    for batch_idx, (data, target) in enumerate(test_loader):
+        data, target = data.to(device), target.to(device)
+        X, y = data.clone().detach(), target.clone().detach()
+
+        # Natural accuracy for this batch
+        with torch.no_grad():
+            out = model(X)
+            natural_err_total += (out.data.max(1)[1] != y.data).float().sum().item()
+
+        # AutoAttack on this batch
+        print(f'Running AutoAttack on batch {batch_idx+1}, samples {total_samples} to {total_samples + X.size(0)}...')
+        x_adv = adversary.run_standard_evaluation(
+            X,
+            y,
+            bs=min(args.test_batch_size, X.size(0)),
+        )
+
+        # Robust accuracy for this batch
+        with torch.no_grad():
+            out_adv = model(x_adv)
+            robust_err_total += (out_adv.data.max(1)[1] != y.data).float().sum().item()
+
+        total_samples += X.size(0)
+
+        # Clear cache after each batch
+        if use_cuda:
+            torch.cuda.empty_cache()
 
     print('natural_err_total: ', natural_err_total)
     print('robust_err_total: ', robust_err_total)
+    print(f'Total samples: {total_samples}')
+    print(f'Natural accuracy: {100.0 - 100.0 * natural_err_total / total_samples:.2f}%')
+    print(f'Robust accuracy: {100.0 - 100.0 * robust_err_total / total_samples:.2f}%')
 
 
 def main():

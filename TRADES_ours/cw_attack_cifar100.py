@@ -18,15 +18,15 @@ except ImportError:
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR100 C&W Attack Evaluation')
-parser.add_argument('--test-batch-size', type=int, default=100, metavar='N',
-                    help='input batch size for testing (default: 100)')
+parser.add_argument('--test-batch-size', type=int, default=200, metavar='N',
+                    help='input batch size for testing (default: 200)')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--c', type=float, default=1.0,
                     help='c parameter in C&W attack')
 parser.add_argument('--kappa', type=float, default=0.0,
                     help='confidence parameter')
-parser.add_argument('--num-steps', default=1000,
+parser.add_argument('--num-steps', type=int, default=1000,
                     help='number of optimization steps')
 parser.add_argument('--lr', type=float, default=0.01,
                     help='learning rate for C&W optimizer')
@@ -71,10 +71,12 @@ def eval_adv_test_whitebox(model, device, test_loader):
     for data, target in test_loader:
         data, target = data.to(device), target.to(device)
         # cw attack
-        X, y = data, target
+        X, y = data.clone().detach(), target.clone().detach()
         err_natural, err_robust = _cw_whitebox(model, X, y)
-        robust_err_total += err_robust
-        natural_err_total += err_natural
+        robust_err_total += err_robust.item()
+        natural_err_total += err_natural.item()
+        if use_cuda:
+            torch.cuda.empty_cache()
     print('natural_err_total: ', natural_err_total)
     print('robust_err_total: ', robust_err_total)
 
